@@ -1,5 +1,8 @@
 # aws-shell
 
+[![Tests](https://github.com/example/aws-shell/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/example/aws-shell/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/example/aws-shell/graph/badge.svg)](https://codecov.io/gh/example/aws-shell)
+
 Interactive ECS shell-connect tool that runs entirely in Go and uses `aws-vault` profile credentials.
 
 ## Prerequisites
