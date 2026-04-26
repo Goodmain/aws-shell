@@ -9,7 +9,7 @@ before:
 builds:
   - id: aws-shell
     binary: aws-shell
-    main: ./main.go
+    main: ./cmd/aws-shell
     env:
       - CGO_ENABLED=0
     goos:
