@@ -190,7 +190,6 @@ func (c *CLI) runAWS(ctx context.Context, cfg Config) int {
 	state := wizardState{profile: cfg.Profile, region: "-", step: "profile"}
 
 	selectedClusterValue := ""
-	clusterDefaultIndex := 1
 
 forCluster:
 	for {
@@ -216,6 +215,7 @@ forCluster:
 		}
 
 		clusterOptions := BuildClusterOptionsWithStats(clusters, clusterStatsByARN)
+		var clusterDefaultIndex int
 		if selectedClusterValue != "" {
 			if idx, ok := defaultIndexForValue(clusterOptions, selectedClusterValue); ok {
 				clusterDefaultIndex = idx
@@ -257,7 +257,6 @@ forCluster:
 		}
 
 		selectedClusterValue = selectedCluster.Value
-		clusterDefaultIndex, _ = defaultIndexForValue(clusterOptions, selectedClusterValue)
 
 		selectedClusterModel := ClusterSelection{ARN: selectedCluster.Value, Label: selectedCluster.Label}
 		state.service = ""
@@ -275,7 +274,6 @@ forCluster:
 		state.cluster = clusterName
 
 		selectedServiceValue := ""
-		serviceDefaultIndex := 1
 
 	forService:
 		for {
@@ -296,6 +294,7 @@ forCluster:
 				return 1
 			}
 			serviceOptions := BuildServiceOptions(services, serviceDetails)
+			var serviceDefaultIndex int
 
 			if selectedServiceValue != "" {
 				if idx, ok := defaultIndexForValue(serviceOptions, selectedServiceValue); ok {
@@ -340,7 +339,6 @@ forCluster:
 			}
 
 			selectedServiceValue = selectedService.Value
-			serviceDefaultIndex, _ = defaultIndexForValue(serviceOptions, selectedServiceValue)
 
 			selectedServiceName := ResourceName(selectedService.Value)
 			if selectedServiceName == "" {
@@ -405,8 +403,6 @@ forCluster:
 				}
 			}
 
-			taskDefaultIndex := 1
-
 		forTask:
 			for {
 				if activeTask.Value == "" {
@@ -422,6 +418,7 @@ forCluster:
 					}
 
 					taskOptions := BuildTaskOptions(tasks)
+					var taskDefaultIndex int
 					if selectedTask.Value != "" {
 						if idx, ok := defaultIndexForValue(taskOptions, selectedTask.Value); ok {
 							taskDefaultIndex = idx
@@ -466,7 +463,6 @@ forCluster:
 
 					taskFromStartup = false
 					selectedTask = activeTask
-					taskDefaultIndex, _ = defaultIndexForValue(taskOptions, selectedTask.Value)
 				}
 
 				taskID := ResourceName(activeTask.Value)

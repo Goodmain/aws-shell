@@ -55,4 +55,12 @@ go run ./cmd/aws-shell --mode aws --profile sandbox
 go test ./...
 ```
 
+## Lint
+
+Run the same linter version as CI:
+
+```bash
+go run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8 run
+```
+
 Optional smoke test instructions are in `test/smoke/README.md`.

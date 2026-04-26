@@ -41,9 +41,7 @@ func (c *SDKClient) ListClusters(ctx context.Context, nextToken *string) ([]stri
 	}
 
 	clusters := make([]string, 0, len(out.ClusterArns))
-	for _, arn := range out.ClusterArns {
-		clusters = append(clusters, arn)
-	}
+	clusters = append(clusters, out.ClusterArns...)
 
 	return clusters, out.NextToken, nil
 }
@@ -62,9 +60,7 @@ func (c *SDKClient) ListServices(ctx context.Context, clusterArn string, nextTok
 	}
 
 	services := make([]string, 0, len(out.ServiceArns))
-	for _, arn := range out.ServiceArns {
-		services = append(services, arn)
-	}
+	services = append(services, out.ServiceArns...)
 
 	return services, out.NextToken, nil
 }
@@ -85,9 +81,7 @@ func (c *SDKClient) ListTasks(ctx context.Context, clusterArn string, serviceNam
 	}
 
 	tasks := make([]string, 0, len(out.TaskArns))
-	for _, arn := range out.TaskArns {
-		tasks = append(tasks, arn)
-	}
+	tasks = append(tasks, out.TaskArns...)
 
 	return tasks, out.NextToken, nil
 }

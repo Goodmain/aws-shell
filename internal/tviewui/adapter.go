@@ -326,7 +326,9 @@ func (a *Adapter) completeSelection(result selectionResponse) {
 
 	if started {
 		if errors.Is(result.err, core.ErrSelectionCanceled) || result.option.Value == core.WizardActionQuit {
-			go a.Quit()
+			go func() {
+				_ = a.Quit()
+			}()
 			return
 		}
 
