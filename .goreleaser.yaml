@@ -1,4 +1,3 @@
-# .goreleaser.yml
 version: 2
 
 before:
@@ -8,7 +7,7 @@ before:
 
 builds:
   - id: aws-shell
-    binary: aws-shell
+    binary: awsh
     main: ./cmd/aws-shell
     env:
       - CGO_ENABLED=0
@@ -30,6 +29,8 @@ builds:
 
 archives:
   - id: aws-shell
+    builds:
+      - aws-shell
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
@@ -60,7 +61,7 @@ changelog:
       - Merge branch
 
 brews:
-  - name: aws-shell
+  - name: awsh
     repository:
       owner: Goodmain
       name: homebrew-aws-shell
@@ -74,9 +75,9 @@ brews:
     description: "AWS Shell - A CLI tool for AWS"
     license: "MIT"
     test: |
-      system "#{bin}/aws-shell --version"
+      system "#{bin}/awsh --version"
     install: |
-      bin.install "aws-shell"
+      bin.install "awsh"
 
 release:
   github:
