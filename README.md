@@ -7,14 +7,24 @@ Interactive ECS shell-connect tool that runs entirely in Go and uses `aws-vault`
 
 ## Prerequisites
 
-- Go 1.22+
 - `aws-vault` installed and available in `PATH`
 - At least one configured profile in `aws-vault`
 - IAM permissions for `ecs:ListClusters`, `ecs:ListServices`, `ecs:ListTasks`, `ecs:DescribeTasks`, and `ecs:ExecuteCommand`
 - Session Manager permissions required by ECS Exec (for example `ssm:StartSession`)
 - `session-manager-plugin` installed locally and available in `PATH`
 
-## Build
+## Installation
+
+### Homebrew
+
+```bash
+brew tap Goodmain/aws-shell
+brew install awsh
+```
+
+### Build from source
+
+- Go 1.22+
 
 ```bash
 go build ./cmd/aws-shell
