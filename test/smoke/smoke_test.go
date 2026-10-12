@@ -9,9 +9,12 @@ import (
 )
 
 func TestInteractiveFlowSmoke(t *testing.T) {
-	profile := os.Getenv("AWS_VAULT_SMOKE_PROFILE")
+	profile := os.Getenv("AWS_SHELL_SMOKE_PROFILE")
 	if profile == "" {
-		t.Skip("set AWS_VAULT_SMOKE_PROFILE to run smoke test")
+		profile = os.Getenv("AWS_VAULT_SMOKE_PROFILE")
+	}
+	if profile == "" {
+		t.Skip("set AWS_SHELL_SMOKE_PROFILE to run smoke test")
 	}
 
 	cmd := exec.Command("go", "run", "../../cmd/aws-shell", "--mode", "aws", "--profile", profile)

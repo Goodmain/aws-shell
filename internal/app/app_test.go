@@ -12,14 +12,23 @@ import (
 
 type fakeRunner struct {
 	lookPathErr error
+	available   map[string]bool
 	output      string
 	outputErr   error
+	outputs     map[string][]outputResult
+	outputCalls map[string]int
 	runExitCode int
 	runErr      error
 	runResults  []runnerResult
 	runCalls    int
 	runName     string
 	runArgs     []string
+	runEnv      map[string]string
+}
+
+type outputResult struct {
+	output string
+	err    error
 }
 
 type runnerResult struct {
@@ -27,14 +36,35 @@ type runnerResult struct {
 	err      error
 }
 
-func (f *fakeRunner) LookPath(_ string) (string, error) {
+func (f *fakeRunner) LookPath(file string) (string, error) {
 	if f.lookPathErr != nil {
 		return "", f.lookPathErr
 	}
-	return "/usr/local/bin/aws-vault", nil
+	if f.available != nil {
+		if !f.available[file] {
+			return "", errors.New("missing")
+		}
+		return "/usr/local/bin/" + file, nil
+	}
+	if file == "aws-vault" {
+		return "/usr/local/bin/aws-vault", nil
+	}
+	return "", errors.New("missing")
 }
 
-func (f *fakeRunner) Output(_ context.Context, _ string, _ ...string) (string, error) {
+func (f *fakeRunner) Output(_ context.Context, name string, args ...string) (string, error) {
+	key := strings.Join(append([]string{name}, args...), " ")
+	if results := f.outputs[key]; len(results) > 0 {
+		if f.outputCalls == nil {
+			f.outputCalls = make(map[string]int)
+		}
+		idx := f.outputCalls[key]
+		if idx >= len(results) {
+			idx = len(results) - 1
+		}
+		f.outputCalls[key]++
+		return results[idx].output, results[idx].err
+	}
 	if f.outputErr != nil {
 		return "", f.outputErr
 	}
@@ -42,8 +72,17 @@ func (f *fakeRunner) Output(_ context.Context, _ string, _ ...string) (string, e
 }
 
 func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (int, error) {
+	return f.recordRun(nil, name, args...)
+}
+
+func (f *fakeRunner) RunWithEnv(_ context.Context, env map[string]string, name string, args ...string) (int, error) {
+	return f.recordRun(env, name, args...)
+}
+
+func (f *fakeRunner) recordRun(env map[string]string, name string, args ...string) (int, error) {
 	f.runName = name
 	f.runArgs = append([]string{}, args...)
+	f.runEnv = env
 	f.runCalls++
 	if len(f.runResults) > 0 {
 		idx := f.runCalls - 1
@@ -114,22 +153,39 @@ type fakeECSClient struct {
 }
 
 type fakeProfilePreferenceStore struct {
-	loadProfile string
-	loadErr     error
-	saveErr     error
-	saved       string
+	loadProfile   string
+	profiles      map[string]string
+	loadProvider  string
+	loadErr       error
+	saveErr       error
+	saved         string
+	savedProvider string
 }
 
-func (f *fakeProfilePreferenceStore) LoadLastUsedProfile() (string, error) {
+func (f *fakeProfilePreferenceStore) LoadLastUsedProfile(provider string) (string, error) {
 	if f.loadErr != nil {
 		return "", f.loadErr
 	}
-
+	if f.profiles != nil {
+		return f.profiles[provider], nil
+	}
 	return f.loadProfile, nil
 }
 
-func (f *fakeProfilePreferenceStore) SaveLastUsedProfile(profile string) error {
+func (f *fakeProfilePreferenceStore) SaveLastUsedProfile(_ string, profile string) error {
 	f.saved = profile
+	return f.saveErr
+}
+
+func (f *fakeProfilePreferenceStore) LoadLastUsedProvider() (string, error) {
+	if f.loadErr != nil {
+		return "", f.loadErr
+	}
+	return f.loadProvider, nil
+}
+
+func (f *fakeProfilePreferenceStore) SaveLastUsedProvider(provider string) error {
+	f.savedProvider = provider
 	return f.saveErr
 }
 
@@ -346,7 +402,7 @@ func TestNewCLIPanicsWhenUIAdapterMissing(t *testing.T) {
 	_ = NewCLI(Dependencies{})
 }
 
-func TestRunBootstrapFailsWhenAWSVaultMissing(t *testing.T) {
+func TestRunBootstrapFailsWhenAuthToolsMissing(t *testing.T) {
 	stderr := &strings.Builder{}
 	cli := newTestCLI(Dependencies{
 		Runner:   &fakeRunner{lookPathErr: errors.New("missing")},
@@ -360,8 +416,8 @@ func TestRunBootstrapFailsWhenAWSVaultMissing(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code")
 	}
-	if !strings.Contains(stderr.String(), "aws-vault is required") {
-		t.Fatalf("expected aws-vault guidance, got %q", stderr.String())
+	if !strings.Contains(stderr.String(), "install aws-vault or the AWS CLI") {
+		t.Fatalf("expected auth tool guidance, got %q", stderr.String())
 	}
 }
 
@@ -435,7 +491,7 @@ func TestRunBootstrapUsesConsoleSelectorWhenUIConfigured(t *testing.T) {
 	if ui.quitCalls != 0 {
 		t.Fatalf("expected no ui quit call in bootstrap, got %d", ui.quitCalls)
 	}
-	if !strings.Contains(stdout.String(), "Selected profile \"dev\". Launching aws-vault...") {
+	if !strings.Contains(stdout.String(), "Selected profile \"dev\". Launching with aws-vault...") {
 		t.Fatalf("expected console handoff message, got %q", stdout.String())
 	}
 }
@@ -985,10 +1041,10 @@ func TestRunAWSConnectFailureRetriesInsteadOfExiting(t *testing.T) {
 	stderr := &strings.Builder{}
 	runner := &fakeRunner{runResults: []runnerResult{{exitCode: 37, err: errors.New("exec failed")}, {exitCode: 0, err: nil}}}
 	selector := &recordingSelector{selections: map[string]Option{
-		"Select ECS cluster":                    {Label: "dev", Value: "cluster"},
-		"Select ECS service":                    {Label: "api", Value: "service"},
-		"Select container":                      {Label: "api", Value: "api"},
-		"Select task (first option is default)": {Label: "task-1", Value: "task-1"},
+		"Select ECS cluster":                     {Label: "dev", Value: "cluster"},
+		"Select ECS service":                     {Label: "api", Value: "service"},
+		"Select container":                       {Label: "api", Value: "api"},
+		"Select task (first option is default)":  {Label: "task-1", Value: "task-1"},
 		"Connect to cluster/service/api/task-1?": {Label: "Connect", Value: "yes"},
 	}}
 	client := &fakeECSClient{
@@ -1022,12 +1078,12 @@ func TestRunAWSConnectFailureRetriesInsteadOfExiting(t *testing.T) {
 func TestRunAWSConnectFailureBackReturnsToContainerSelection(t *testing.T) {
 	runner := &fakeRunner{runResults: []runnerResult{{exitCode: 37, err: errors.New("exec failed")}, {exitCode: 0, err: nil}}}
 	selector := &recordingSelector{selections: map[string]Option{
-		"Select ECS cluster":                    {Label: "dev", Value: "cluster"},
-		"Select ECS service":                    {Label: "api", Value: "service"},
-		"Select container":                      {Label: "api", Value: "api"},
-		"Select task (first option is default)": {Label: "task-1", Value: "task-1"},
+		"Select ECS cluster":                     {Label: "dev", Value: "cluster"},
+		"Select ECS service":                     {Label: "api", Value: "service"},
+		"Select container":                       {Label: "api", Value: "api"},
+		"Select task (first option is default)":  {Label: "task-1", Value: "task-1"},
 		"Connect to cluster/service/api/task-1?": {Label: "Connect", Value: "yes"},
-		connectionFailureRetryBackPrompt:        {Label: "Back", Value: string(RetryBackActionBack)},
+		connectionFailureRetryBackPrompt:         {Label: "Back", Value: string(RetryBackActionBack)},
 	}}
 	client := &fakeECSClient{
 		clustersPages: [][]string{{"cluster"}},
@@ -1123,7 +1179,7 @@ func TestRunAWSZeroCapacityStartupSkipsTaskSelection(t *testing.T) {
 		"Select ECS cluster": {Label: "dev", Value: "cluster"},
 		"Select ECS service": {Label: "api (0/0)", Value: "service"},
 		"Service service has no active or pending tasks. Start one task now?": {Label: "Start task", Value: "yes"},
-		"Select container": {Label: "api (container-123)", Value: "api"},
+		"Select container":                         {Label: "api (container-123)", Value: "api"},
 		"Connect to cluster/service/api/task-123?": {Label: "Connect", Value: "yes"},
 	}}
 	client := &fakeECSClient{
@@ -1166,7 +1222,7 @@ func TestRunAWSZeroCapacityStartedTaskConnectFailureReturnsToContainerSelection(
 		"Select ECS cluster": {Label: "dev", Value: "cluster"},
 		"Select ECS service": {Label: "api (0/0)", Value: "service"},
 		"Service service has no active or pending tasks. Start one task now?": {Label: "Start task", Value: "yes"},
-		"Select container": {Label: "api (container-123)", Value: "api"},
+		"Select container":                         {Label: "api (container-123)", Value: "api"},
 		"Connect to cluster/service/api/task-123?": {Label: "Connect", Value: "yes"},
 	}}
 	runner := &fakeRunner{runResults: []runnerResult{{exitCode: 11, err: errors.New("connect failed")}, {exitCode: 0, err: nil}}}

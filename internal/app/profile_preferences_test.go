@@ -12,11 +12,11 @@ func TestFileProfilePreferenceStoreLoadAndSave(t *testing.T) {
 	store := NewFileProfilePreferenceStore()
 	store.userConfigDir = func() (string, error) { return tempDir, nil }
 
-	if err := store.SaveLastUsedProfile("dev"); err != nil {
+	if err := store.SaveLastUsedProfile(AuthAWSVault, "dev"); err != nil {
 		t.Fatalf("unexpected save error: %v", err)
 	}
 
-	profile, err := store.LoadLastUsedProfile()
+	profile, err := store.LoadLastUsedProfile(AuthAWSVault)
 	if err != nil {
 		t.Fatalf("unexpected load error: %v", err)
 	}
@@ -25,11 +25,52 @@ func TestFileProfilePreferenceStoreLoadAndSave(t *testing.T) {
 	}
 }
 
+func TestFileProfilePreferenceStoreKeepsProfilesPerProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewFileProfilePreferenceStore()
+	store.userConfigDir = func() (string, error) { return tempDir, nil }
+
+	if err := store.SaveLastUsedProfile(AuthAWSVault, "vault-dev"); err != nil {
+		t.Fatalf("save vault profile: %v", err)
+	}
+	if err := store.SaveLastUsedProfile(AuthAWSSSO, "sso-dev"); err != nil {
+		t.Fatalf("save SSO profile: %v", err)
+	}
+	if err := store.SaveLastUsedProvider(AuthAWSSSO); err != nil {
+		t.Fatalf("save provider: %v", err)
+	}
+
+	vault, _ := store.LoadLastUsedProfile(AuthAWSVault)
+	sso, _ := store.LoadLastUsedProfile(AuthAWSSSO)
+	provider, _ := store.LoadLastUsedProvider()
+	if vault != "vault-dev" || sso != "sso-dev" || provider != AuthAWSSSO {
+		t.Fatalf("got vault=%q sso=%q provider=%q", vault, sso, provider)
+	}
+}
+
+func TestFileProfilePreferenceStoreLoadsLegacyVaultProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewFileProfilePreferenceStore()
+	store.userConfigDir = func() (string, error) { return tempDir, nil }
+	path := profilePreferencesPath(tempDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"last_used_profile":"legacy"}`), 0o600); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	profile, err := store.LoadLastUsedProfile(AuthAWSVault)
+	if err != nil || profile != "legacy" {
+		t.Fatalf("got profile=%q err=%v", profile, err)
+	}
+}
+
 func TestFileProfilePreferenceStoreLoadMissingFile(t *testing.T) {
 	store := NewFileProfilePreferenceStore()
 	store.userConfigDir = func() (string, error) { return t.TempDir(), nil }
 
-	profile, err := store.LoadLastUsedProfile()
+	profile, err := store.LoadLastUsedProfile(AuthAWSVault)
 	if err != nil {
 		t.Fatalf("expected nil error for missing file, got %v", err)
 	}
@@ -51,8 +92,29 @@ func TestFileProfilePreferenceStoreLoadInvalidJSON(t *testing.T) {
 		t.Fatalf("write failed: %v", err)
 	}
 
-	if _, err := store.LoadLastUsedProfile(); err == nil {
+	if _, err := store.LoadLastUsedProfile(AuthAWSVault); err == nil {
 		t.Fatalf("expected json parse error")
+	}
+}
+
+func TestFileProfilePreferenceStoreSaveReplacesInvalidJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewFileProfilePreferenceStore()
+	store.userConfigDir = func() (string, error) { return tempDir, nil }
+	path := profilePreferencesPath(tempDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("not-json"), 0o600); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	if err := store.SaveLastUsedProfile(AuthAWSSSO, "dev"); err != nil {
+		t.Fatalf("save should replace invalid preferences: %v", err)
+	}
+	profile, err := store.LoadLastUsedProfile(AuthAWSSSO)
+	if err != nil || profile != "dev" {
+		t.Fatalf("got profile=%q err=%v", profile, err)
 	}
 }
 
@@ -81,7 +143,7 @@ func TestFileProfilePreferenceStoreConfigDirError(t *testing.T) {
 	store := NewFileProfilePreferenceStore()
 	store.userConfigDir = func() (string, error) { return "", errors.New("boom") }
 
-	if _, err := store.LoadLastUsedProfile(); err == nil {
+	if _, err := store.LoadLastUsedProfile(AuthAWSVault); err == nil {
 		t.Fatalf("expected config dir error")
 	}
 }

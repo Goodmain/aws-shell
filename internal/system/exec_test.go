@@ -142,3 +142,23 @@ func TestAttachInteractiveIOUsesProvidedAndDefaultStderr(t *testing.T) {
 		t.Fatalf("expected os.Stderr fallback")
 	}
 }
+
+func TestMergeEnvPreservesBaseAndOverlaysValues(t *testing.T) {
+	got := mergeEnv([]string{"PATH=/bin", "AWS_PROFILE=old", "AWS_ACCESS_KEY_ID=stale"}, map[string]string{
+		"AWS_PROFILE":       "new",
+		"AWS_ACCESS_KEY_ID": "",
+		"EXTRA":             "value",
+	})
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{"PATH=/bin", "AWS_PROFILE=new", "EXTRA=value"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("merged environment %q does not contain %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "AWS_PROFILE=old") {
+		t.Fatalf("old overlay value remained in %q", joined)
+	}
+	if strings.Contains(joined, "AWS_ACCESS_KEY_ID=") {
+		t.Fatalf("unset value remained in %q", joined)
+	}
+}
