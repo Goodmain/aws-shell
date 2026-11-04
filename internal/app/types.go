@@ -9,6 +9,8 @@ import (
 const (
 	ModeBootstrap = "bootstrap"
 	ModeAWS       = "aws"
+	AuthAWSVault  = "aws-vault"
+	AuthAWSSSO    = "aws-sso"
 )
 
 var ErrSelectionCanceled = errors.New("selection canceled")
@@ -17,6 +19,21 @@ type Runner interface {
 	LookPath(file string) (string, error)
 	Output(ctx context.Context, name string, args ...string) (string, error)
 	Run(ctx context.Context, name string, args ...string) (int, error)
+	RunWithEnv(ctx context.Context, env map[string]string, name string, args ...string) (int, error)
+}
+
+type ExecCommand struct {
+	Name string
+	Args []string
+	Env  map[string]string
+}
+
+type AuthProvider interface {
+	Name() string
+	Available() bool
+	ListProfiles(ctx context.Context) (string, error)
+	EnsureLoggedIn(ctx context.Context, profile string) error
+	WrapExec(executable string, profile string) ExecCommand
 }
 
 type ClusterSelection struct {
@@ -30,22 +47,22 @@ type ServiceSelection struct {
 }
 
 type ContainerSelection struct {
-	Name              string
-	Image             string
-	Status            string
-	CPUResource       string
-	MemoryResource    string
-	Label             string
+	Name           string
+	Image          string
+	Status         string
+	CPUResource    string
+	MemoryResource string
+	Label          string
 }
 
 type TaskSelection struct {
-	ARN   string
-	ID    string
-	Status string
-	CPU    string
-	Memory string
+	ARN       string
+	ID        string
+	Status    string
+	CPU       string
+	Memory    string
 	CreatedAt *time.Time
-	Label string
+	Label     string
 }
 
 type Option struct {
@@ -74,8 +91,10 @@ type UIAdapter interface {
 }
 
 type ProfilePreferenceStore interface {
-	LoadLastUsedProfile() (string, error)
-	SaveLastUsedProfile(profile string) error
+	LoadLastUsedProfile(provider string) (string, error)
+	SaveLastUsedProfile(provider string, profile string) error
+	LoadLastUsedProvider() (string, error)
+	SaveLastUsedProvider(provider string) error
 }
 
 type ECSClient interface {

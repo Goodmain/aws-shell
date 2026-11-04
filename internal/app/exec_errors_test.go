@@ -1,9 +1,17 @@
 package app
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestFormatListClustersErrorExplainsMissingRegion(t *testing.T) {
+	message := FormatListClustersError("amp:audiencesDeveloper", errors.New("endpoint rule error, Invalid Configuration: Missing Region"))
+	if !strings.Contains(message, "AWS region is not configured") || !strings.Contains(message, `--profile "amp:audiencesDeveloper"`) {
+		t.Fatalf("unexpected message: %q", message)
+	}
+}
 
 func TestFormatConnectErrorMappings(t *testing.T) {
 	tests := []struct {

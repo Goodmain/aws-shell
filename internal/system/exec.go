@@ -37,7 +37,14 @@ func (r *ExecRunner) Output(ctx context.Context, name string, args ...string) (s
 }
 
 func (r *ExecRunner) Run(ctx context.Context, name string, args ...string) (int, error) {
+	return r.RunWithEnv(ctx, nil, name, args...)
+}
+
+func (r *ExecRunner) RunWithEnv(ctx context.Context, env map[string]string, name string, args ...string) (int, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	if len(env) > 0 {
+		cmd.Env = mergeEnv(os.Environ(), env)
+	}
 	attachInteractiveIO(cmd, r.stderr)
 
 	err := cmd.Run()
@@ -50,6 +57,30 @@ func (r *ExecRunner) Run(ctx context.Context, name string, args ...string) (int,
 	}
 
 	return 1, err
+}
+
+func mergeEnv(base []string, overlay map[string]string) []string {
+	merged := append([]string{}, base...)
+	for key, value := range overlay {
+		prefix := key + "="
+		replaced := false
+		for i := 0; i < len(merged); i++ {
+			entry := merged[i]
+			if len(entry) >= len(prefix) && entry[:len(prefix)] == prefix {
+				if value == "" {
+					merged = append(merged[:i], merged[i+1:]...)
+					i--
+				} else {
+					merged[i] = prefix + value
+				}
+				replaced = true
+			}
+		}
+		if !replaced && value != "" {
+			merged = append(merged, prefix+value)
+		}
+	}
+	return merged
 }
 
 func attachInteractiveIO(cmd *exec.Cmd, stderr io.Writer) {

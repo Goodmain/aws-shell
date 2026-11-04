@@ -14,6 +14,7 @@ import (
 
 type Config struct {
 	Mode       string
+	Auth       string
 	Profile    string
 	Executable string
 }
@@ -109,26 +110,27 @@ func (c *CLI) Run(ctx context.Context, cfg Config) int {
 }
 
 func (c *CLI) runBootstrap(ctx context.Context, cfg Config) int {
-	if _, err := c.runner.LookPath("aws-vault"); err != nil {
-		c.ui.Error("aws-vault is required but was not found in PATH. Install aws-vault and try again.")
+	provider, err := c.selectAuthProvider(cfg.Auth)
+	if err != nil {
+		c.ui.Error(err.Error())
 		return 1
 	}
 
-	profilesOutput, err := c.runner.Output(ctx, "aws-vault", "list", "--profiles")
+	profilesOutput, err := provider.ListProfiles(ctx)
 	if err != nil {
-		c.ui.Error(fmt.Sprintf("failed to list aws-vault profiles: %v", err))
+		c.ui.Error(fmt.Sprintf("failed to list %s profiles: %v", provider.Name(), err))
 		return 1
 	}
 
 	profiles := ParseProfiles(profilesOutput)
 	if len(profiles) == 0 {
-		c.ui.Error("no aws-vault profiles found. Configure at least one profile and try again.")
+		c.ui.Error(fmt.Sprintf("no %s profiles found. Configure at least one profile and try again.", provider.Name()))
 		return 1
 	}
 
 	profileOptions := BuildProfileOptions(profiles)
 	defaultProfileIndex := 0
-	lastUsedProfile, err := c.prefs.LoadLastUsedProfile()
+	lastUsedProfile, err := c.prefs.LoadLastUsedProfile(provider.Name())
 	if err != nil {
 		c.ui.Error(fmt.Sprintf("warning: failed to load last-used profile preference: %v", err))
 	} else if strings.TrimSpace(lastUsedProfile) != "" {
@@ -151,8 +153,16 @@ func (c *CLI) runBootstrap(ctx context.Context, cfg Config) int {
 		return 1
 	}
 
-	if err := c.prefs.SaveLastUsedProfile(selected.Value); err != nil {
+	if err := provider.EnsureLoggedIn(ctx, selected.Value); err != nil {
+		c.ui.Error(err.Error())
+		return 1
+	}
+
+	if err := c.prefs.SaveLastUsedProfile(provider.Name(), selected.Value); err != nil {
 		c.ui.Error(fmt.Sprintf("warning: failed to persist last-used profile preference: %v", err))
+	}
+	if err := c.prefs.SaveLastUsedProvider(provider.Name()); err != nil {
+		c.ui.Error(fmt.Sprintf("warning: failed to persist last-used auth provider preference: %v", err))
 	}
 
 	if strings.TrimSpace(cfg.Executable) == "" {
@@ -160,12 +170,12 @@ func (c *CLI) runBootstrap(ctx context.Context, cfg Config) int {
 		return 1
 	}
 
-	fmt.Fprintf(c.stdout, "Selected profile %q. Launching aws-vault...\n", selected.Value)
+	fmt.Fprintf(c.stdout, "Selected profile %q. Launching with %s...\n", selected.Value, provider.Name())
 
-	args := system.ComposeAWSVaultExecArgs(cfg.Executable, selected.Value)
-	exitCode, execErr := c.runner.Run(ctx, "aws-vault", args...)
+	command := provider.WrapExec(cfg.Executable, selected.Value)
+	exitCode, execErr := c.runner.RunWithEnv(ctx, command.Env, command.Name, command.Args...)
 	if execErr != nil {
-		c.ui.Error(fmt.Sprintf("aws-vault execution failed: %v", execErr))
+		c.ui.Error(fmt.Sprintf("%s execution failed: %v", provider.Name(), execErr))
 		if exitCode > 0 {
 			return exitCode
 		}
@@ -173,6 +183,70 @@ func (c *CLI) runBootstrap(ctx context.Context, cfg Config) int {
 	}
 
 	return exitCode
+}
+
+func (c *CLI) selectAuthProvider(requested string) (AuthProvider, error) {
+	providers := map[string]AuthProvider{
+		AuthAWSVault: awsVaultProvider{runner: c.runner},
+		AuthAWSSSO:   awsSSOProvider{runner: c.runner},
+	}
+
+	requested = strings.TrimSpace(requested)
+	if requested != "" {
+		provider, ok := providers[requested]
+		if !ok {
+			return nil, fmt.Errorf("invalid --auth value %q (expected %q or %q)", requested, AuthAWSVault, AuthAWSSSO)
+		}
+		if !provider.Available() {
+			return nil, fmt.Errorf("%s was selected but its required executable was not found in PATH; install %s and try again", requested, providerToolName(requested))
+		}
+		return provider, nil
+	}
+
+	vaultAvailable := providers[AuthAWSVault].Available()
+	ssoAvailable := providers[AuthAWSSSO].Available()
+	switch {
+	case vaultAvailable && !ssoAvailable:
+		return providers[AuthAWSVault], nil
+	case !vaultAvailable && ssoAvailable:
+		return providers[AuthAWSSSO], nil
+	case !vaultAvailable && !ssoAvailable:
+		return nil, errors.New("no supported authentication tool was found in PATH; install aws-vault or the AWS CLI and try again")
+	}
+
+	if c.selector == nil {
+		return nil, errors.New("authentication provider selector is not configured")
+	}
+	options := []Option{
+		{Label: "AWS SSO", Value: AuthAWSSSO},
+		{Label: "aws-vault", Value: AuthAWSVault},
+	}
+	defaultIndex := 0
+	lastProvider, err := c.prefs.LoadLastUsedProvider()
+	if err != nil {
+		c.ui.Error(fmt.Sprintf("warning: failed to load last-used auth provider preference: %v", err))
+	} else if lastProvider != "" {
+		defaultIndex = DefaultOptionIndex(options, lastProvider)
+	}
+	selected, err := c.selector.Select("Select authentication provider", options, defaultIndex)
+	if err != nil {
+		if errors.Is(err, ErrSelectionCanceled) {
+			return nil, errors.New("authentication provider selection canceled")
+		}
+		return nil, fmt.Errorf("failed to select authentication provider: %w", err)
+	}
+	provider, ok := providers[selected.Value]
+	if !ok {
+		return nil, fmt.Errorf("unsupported authentication provider %q", selected.Value)
+	}
+	return provider, nil
+}
+
+func providerToolName(provider string) string {
+	if provider == AuthAWSSSO {
+		return "the AWS CLI"
+	}
+	return "aws-vault"
 }
 
 func (c *CLI) runAWS(ctx context.Context, cfg Config) int {
@@ -195,7 +269,7 @@ forCluster:
 	for {
 		clusters, err := ListAllClusters(ctx, client)
 		if err != nil {
-			c.ui.Error(fmt.Sprintf("failed to list ECS clusters: %v", err))
+			c.ui.Error(FormatListClustersError(cfg.Profile, err))
 			return 1
 		}
 

@@ -15,7 +15,8 @@ import (
 
 func main() {
 	mode := flag.String("mode", app.ModeBootstrap, "execution mode: bootstrap or aws")
-	profile := flag.String("profile", "", "aws-vault profile name")
+	auth := flag.String("auth", "", "authentication provider: aws-vault or aws-sso")
+	profile := flag.String("profile", "", "AWS profile name")
 	flag.Parse()
 
 	executable, err := os.Executable()
@@ -43,6 +44,7 @@ func main() {
 
 	code := cli.Run(context.Background(), app.Config{
 		Mode:       *mode,
+		Auth:       *auth,
 		Profile:    *profile,
 		Executable: executable,
 	})
